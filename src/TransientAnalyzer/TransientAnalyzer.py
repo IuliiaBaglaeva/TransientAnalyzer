@@ -461,7 +461,7 @@ class TransientAnalyzer:
         columns = [f"t0{x_out}",f"delta t0{x_out}",f"Baseline{y_out}",f"Amplitude{y_out}",f"TTP{x_out}",
                    f"t({q1}%-{100-q1}%){x_out}",f"t({q2}%-{100-q2}%){x_out}",f"{q1}% Duration{x_out}",
                    f"{q2}% Duration{x_out}",f"50% Duration{x_out}",f"{100-q2}% Duration{x_out}",
-                   f"{100-q1}% Duration{x_out}",f"t({q1}%-{100-q1}%){x_out}",f"t({q2}%-{100-q2}%){x_out}"]
+                   f"{100-q1}% Duration{x_out}",f"t({100-q1}%-{q1}%){x_out}",f"t({100-q2}%-{q2}%){x_out}"]
         pars = np.array(self.parameters)
         pars[1:,1] = pars[1:,0] - pars[:-1,0]
         df = pd.DataFrame(pars,columns=columns)
