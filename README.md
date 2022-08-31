@@ -2,7 +2,7 @@
 
 Gaussian process regression-based analysis of noisy transient signals.
 
-**Documentation and example:** [ReadTheDocs](http://transientanalyzer.readthedocs.org>)
+**Documentation and example:** [ReadTheDocs](http://transientanalyzer.readthedocs.org)
 
 **Requirements:** 
 [NumPy](http://www.numpy.org/), [SciPy](http://www.scipy.org/), [GPFlow](https://www.gpflow.org/), [Pandas](http://https://pandas.pydata.org/), Python >= 3.7
