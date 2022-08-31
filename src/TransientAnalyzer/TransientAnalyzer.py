@@ -20,7 +20,7 @@ class TransientAnalyzer:
 
    .. math:: K(x, y) = k(x, y)+ \sigma^2 \delta(x, y),
 
-   where ``k(x, y)`` is the covariance matrix, ``&Sigma;`` is the noise amplitude and ``&delta;(x,y)`` is the Kronecker delta.
+   where ``k(x, y)`` is the covariance matrix, ``σ`` is the noise amplitude and ``δ(x,y)`` is the Kronecker delta.
 
    Considering the Bayesian framework the aim is to find the posterior distribution - the prior multivariate Gaussian distribution 
    conditioned on the observed data.
