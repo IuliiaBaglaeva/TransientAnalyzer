@@ -3,3 +3,6 @@ nbsphinx
 docxsphinx
 numpy
 tensorflow
+pandas
+gpflow
+scipy
