@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-@author: Iuliia Baglaeva and Bogdan Iaparov
-"""
+
 import tensorflow as tf
 import gpflow
 
