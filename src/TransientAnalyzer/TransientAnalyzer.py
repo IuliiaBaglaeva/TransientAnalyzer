@@ -20,11 +20,11 @@ class TransientAnalyzer:
 
    .. math:: K(x, y) = k(x, y)+ \sigma^2 \delta(x, y),
 
-   where :math:'k(x, y)' is the covariance matrix, :math:'\sigma' is the noise amplitude and :math:'\delta(x, y)' is the Kronecker delta. 
+   where ``k(x, y)`` is the covariance matrix, ``&Sigma;`` is the noise amplitude and ``&delta;(x,y)`` is the Kronecker delta.
 
    Considering the Bayesian framework the aim is to find the posterior distribution - the prior multivariate Gaussian distribution 
    conditioned on the observed data.
-   The covariance matrix :math:'k(x, y)' defines the mutual relationship between all points of the true signal.
+   The covariance matrix ``k(x, y)`` defines the mutual relationship between all points of the true signal.
     
     Since transients signals are non-stationary processes with fast rise and slow decay the kernel of GP being used is :class:`LinearGibbs`
     """
