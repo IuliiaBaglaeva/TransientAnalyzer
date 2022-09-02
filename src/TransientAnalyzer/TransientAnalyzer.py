@@ -422,8 +422,7 @@ class TransientAnalyzer:
             t, sig = self.GetExpTransient(i)
             if i == 0: #draw baseline
                 t_bl, sig_bl = self.GetExpTransient(i, False)
-                t0 = max(t[0],t_bl[0] - self._n_baseline*self.dt)
-                t_start = np.array([t0,t_bl[0]])
+                t_start = np.array([t[0],t_bl[0] - self.dt])
                 y_start = np.array([self.baselines[i],self.baselines[i]])
                 t_model_out = np.hstack((t_model_out, t_start))
                 sig_model_out = np.hstack((sig_model_out, y_start))
