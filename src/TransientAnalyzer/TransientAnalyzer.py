@@ -407,7 +407,7 @@ class TransientAnalyzer:
         sig_model_out = np.array([])
         for i in range(len(self.t0s)):
             t, sig = self.GetExpTransient(i)
-            t_model, sig_model = self.GetApproxTransient(i,0.3*self.dt)
+            t_model, sig_model = self.GetApproxTransient(i,0.5*self.dt)
             t_exp_out = np.hstack((t_exp_out,t))
             t_model_out = np.hstack((t_model_out,t_model))
             sig_exp_out = np.hstack((sig_exp_out,sig))
@@ -459,9 +459,9 @@ class TransientAnalyzer:
         else:
             y_out = ""
         columns = [f"t0{x_out}",f"delta t0{x_out}",f"Baseline{y_out}",f"Amplitude{y_out}",f"TTP{x_out}",
-                   f"t({q1}%-{100-q1}%){x_out}",f"t({q2}%-{100-q2}%){x_out}",f"{q1}% Duration{x_out}",
-                   f"{q2}% Duration{x_out}",f"50% Duration{x_out}",f"{100-q2}% Duration{x_out}",
-                   f"{100-q1}% Duration{x_out}",f"t({100-q1}%-{q1}%){x_out}",f"t({100-q2}%-{q2}%){x_out}"]
+                   f"t_{q1}%-{100-q1}%{x_out}",f"t_{q2}%-{100-q2}%{x_out}",f"d_{q1}%{x_out}",
+                   f"d_{q2}%{x_out}",f"d_50%{x_out}",f"d_{100-q2}%{x_out}",
+                   f"d_{100-q1}%{x_out}",f"t_{q1}%-{100-q1}%{x_out}",f"t_{q2}%-{100-q2}%{x_out}"]
         pars = np.array(self.parameters)
         pars[1:,1] = pars[1:,0] - pars[:-1,0]
         df = pd.DataFrame(pars,columns=columns)
