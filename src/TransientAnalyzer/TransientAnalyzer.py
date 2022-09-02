@@ -7,7 +7,7 @@ from scipy.optimize import minimize, bisect
 from copy import deepcopy
 from scipy.interpolate import CubicSpline, interp1d
 import gpflow
-from LinearGibbs import LinearGibbs
+from .LinearGibbs import LinearGibbs
 import re
 
 
