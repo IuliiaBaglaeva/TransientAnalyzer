@@ -300,7 +300,8 @@ class TransientAnalyzer:
         if idx == 0:
             self.parameters[idx].append(np.nan)
         else:
-            self.parameters[idx].append(self.t0s[idx] - self.t0s[idx - 1])
+            self.parameters[idx].append(self.t0s[idx] - self.t0s[idx - 1])  
+        self.parameters[idx].append(self.t0s[idx]-self.t0s_est[idx])    
         self.parameters[idx].append(baseline)
         y = np.zeros_like(xp)
         mean, _ = gpr.predict_y(xp.reshape(-1, 1))
@@ -364,8 +365,8 @@ class TransientAnalyzer:
             self.parameters[idx].append(half_decay - half_rise)
         else:
             self.parameters[idx].append(np.nan)
-        self.parameters[idx].append(q2m_decay - t0_sig)
-        self.parameters[idx].append(q1m_decay - t0_sig)
+        #self.parameters[idx].append(q2m_decay - t0_sig)
+        #self.parameters[idx].append(q1m_decay - t0_sig)
         self.parameters[idx].append(q1_decay - q1m_decay)  # decay times
         self.parameters[idx].append(q2_decay - q2m_decay)
         if idx is not len(self.borders) - 2:
@@ -448,12 +449,12 @@ class TransientAnalyzer:
      * Amplitude;
      * Baseline;
      * Time-to-peak (*TTP*);
-     * Rise time at quantiles (*x-(1-x)%*) defined by user (20-80%, 10-90%, etc.);
-     * Transients durations at quantiles (*x%*) defined by user (10%, 20%, etc.) and at 50% (Full Duration at Half Maximum (FDHM));
-     * Decay time at quantiles (*(1-x)-x%*) defined by user (80-20%, 90-10%, etc.);
+     * Rise time at quantiles (*x-(100-x)%*) defined by user (20-80%, 10-90%, etc.);
+     * Transients durations at quantiles (*100-x%*) defined by user (80%, 90%, etc.) and at 50% (Full Duration at Half Maximum (FDHM));
+     * Decay time at quantiles (*(100-x)-x%*) defined by user (80-20%, 90-10%, etc.);
 
        Table of parameters contains values of *t0* - the start time of the transient or of the stimulus, *delta t0* - the difference in t0 between two
-       neighboring transients.
+       neighboring transients and Delay - the difference between stimulus time and the start of the transient.
 
         :param x_label: name of x axis
         :type x_label: str
@@ -477,10 +478,9 @@ class TransientAnalyzer:
             y_out = y_out[0]
         else:
             y_out = ""
-        columns = [f"t0{x_out}", f"delta t0{x_out}", f"Baseline{y_out}", f"Amplitude{y_out}", f"TTP{x_out}",
-                   f"t_{q1}%-{100 - q1}%{x_out}", f"t_{q2}%-{100 - q2}%{x_out}", f"d_{q1}%{x_out}",
-                   f"d_{q2}%{x_out}", f"d_50%{x_out}", f"d_{100 - q2}%{x_out}",
-                   f"d_{100 - q1}%{x_out}", f"t_{100-q1}%-{q1}%{x_out}", f"t_{100-q2}%-{q2}%{x_out}"]
+        columns = [f"t0{x_out}", f"delta t0{x_out}", f"Delay{x_out}", f"Baseline{y_out}", f"Amplitude{y_out}", f"TTP{x_out}",
+                   f"t_{q1}%-{100 - q1}%{x_out}", f"t_{q2}%-{100 - q2}%{x_out}", f"d_{100 - q1}%{x_out}",
+                   f"d_{100 - q2}%{x_out}", f"FDHM{x_out}", f"t_{100-q1}%-{q1}%{x_out}", f"t_{100-q2}%-{q2}%{x_out}"]
         pars = np.array(self.parameters)
         pars[1:, 1] = pars[1:, 0] - pars[:-1, 0]
         df = pd.DataFrame(pars, columns=columns)
