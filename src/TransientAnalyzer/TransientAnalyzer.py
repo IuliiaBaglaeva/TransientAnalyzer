@@ -13,31 +13,41 @@ import re
 
 class TransientAnalyzer:
     """The Class of **TransientAnalyzer** is used to analyze transient signals (calcium transients, spikes, sparks, contractions, etc.).
-   This class is able to analyse robustly individual noisy signals. TransientAnalyzer is based on Gaussian process with the
-   **Linear Gibbs kernel** of covariance matrix. Numpy Arrays of signals and time are an input to the class.
-   TransientAnalyser includes automatic detection of starts of transient *t0*, approximation of transient using Gaussian process regression (GPR) and
-   the obtainment of signal parameters, describing amplitude and kinetics of individual signal. There is also possibility to provide stimuli time points instead of automatic detection.
-   GPR is a type of Bayesian Regression with the prior distribution being a multivariate Gaussian distribution with an arbitrary mean (usually set to 0) and a total N-dimensional covariance matrix K with the elements:
+   This class can robustly analyze individual noisy signals. TransientAnalyzer is based on the Gaussian process 
+   with the **Linear Gibbs kernel** of the covariance matrix. The class takes Numpy Arrays of time and signals   as input. 
+   TransientAnalyser includes automatic detection of the starting points of the transients, approximation of transient using Gaussian process regression (GPR) and
+   determination of signal parameters describing amplitude and kinetics of individual transients. Automatic detection can be superseded by the input of stimulus time points as Numpy array.
+   
+    There are two parameters which regulate detection of onset times: window_size (default to 20) and prominence(defaults to 1) that can improve the detection of starting point in case of problems.
+    In case of wrong detection of starting point (some kind of displacement) change the window_size. If the number of detection transients is higher (lower) than it actually is (it can be in case of the high noise),
+    decrease (or increase) the prominence. There is also possibility to provide stimuli times (t_stim parameter) instead of automatic detection.
 
+GPR is a type of Bayesian Regression with the prior distribution being a multivariate Gaussian distribution with an arbitrary mean (usually set to 0) 
+and a total N-dimensional covariance matrix K with the elements:
    .. math:: K(x, y) = k(x, y)+ \sigma^2 \delta(x, y),
 
    where ``k(x, y)`` is the covariance matrix, ``σ`` is the noise amplitude and ``δ(x,y)`` is the Kronecker delta.
 
-   Considering the Bayesian framework the aim is to find the posterior distribution - the prior multivariate Gaussian distribution
-   conditioned on the observed data.
+   Considering the Bayesian framework the aim is to find the posterior distribution, i.e.the prior multivariate Gaussian distribution conditioned on the observed data.
    The covariance matrix ``k(x, y)`` defines the mutual relationship between all points of the true signal.
 
-    Since transients signals are non-stationary processes with fast rise and slow decay the kernel of GP being used is :class:`LinearGibbs`
-    """
+    Since transients signals are non-stationary processes that most often have a fast rise and a slower decay, the kernel of GP being used is :class:`LinearGibbs`
+    
+    The class provides the following parameters:
+     * Baseline;
+     * Amplitude;
+     * Rise time at percentiles (*x-(100-x)%*) defined by user (20-80%, 10-90%, etc.);
+     * Time-to-peak (*TTP*);
+     * FDHM - Full Duration at Half Maximum
+     * Decay time at percentiles (*(100-x)-x%*) defined by user (80-20%, 90-10%, etc.);
+     * Transients durations at percentiles (*100-x%*) defined by user (80%, 90%, etc.);    
+     """
 
     def __init__(self, time, Sig, kernel="Gibbs",
                  window_size=20, prominence=1, t_stim=None,
                  quantile1=0.1, quantile2=0.2):
         """
-        There are two parameters which regulate detection of onset times: window_size (default to 20) and prominence(defaults to 1) that can improve the detection of t0 in case of problems.
-        In case of wrong detection of t0 (some kind of displacement) change the window_size. If the number of detection transients is higher (lower) than it actually is (it can be in case of the high noise),
-        decrease (or increase) the prominence. There is also possibility to provide stimuli times (t_stim parameter) instead of automatic detection.
-
+        
         :param time: array of the values of the time during contraction
         :type time: array_like
         :param Sig: array of the values of the transients
@@ -118,7 +128,7 @@ class TransientAnalyzer:
 
         :param idx: index of the signal
         :type value: int
-        :param output: defines whether it is used for the output of the data or for approximation, defaults to True
+        :param output: defines whether the baseline of the transient is also provided in the signal array, applies only to the first transient, defaults to True
         :type value: bool, optional
         :return: two 1-d arrays, which contain time and signal
         :rtype: array-like, array-like and array-like or None
@@ -296,13 +306,6 @@ class TransientAnalyzer:
         cs_t0 = CubicSpline(x_findt0, t0_values)
         t0_sig = self._Gradient(x_findt0[-1], cs_t0, baseline)
         self.t0s[idx] = t0_sig + ti
-        self.parameters[idx].append(self.t0s[idx])
-        if idx == 0:
-            self.parameters[idx].append(np.nan)
-        else:
-            self.parameters[idx].append(self.t0s[idx] - self.t0s[idx - 1])  
-        self.parameters[idx].append(self.t0s[idx]-self.t0s_est[idx])    
-        self.parameters[idx].append(baseline)
         y = np.zeros_like(xp)
         mean, _ = gpr.predict_y(xp.reshape(-1, 1))
         y = mean[:, 0]
@@ -310,11 +313,20 @@ class TransientAnalyzer:
         self.transients[idx] = cs
         Peak_sig = minimize(self._MinFunc, x0=[t0_sig + 1.55 * self._n_samples_offset * self.dt],
                             args=(self.transients[idx], True))
-        Amp_sig = -Peak_sig.fun
+        Amp_sig = -Peak_sig.fun - baseline
         TTP_sig = Peak_sig.x[0]
         base_sig = baseline
+        self.parameters[idx].append(baseline)
         self.parameters[idx].append(Amp_sig)
-        self.parameters[idx].append(TTP_sig - t0_sig)
+        self.parameters[idx].append(self.t0s[idx])
+        if idx == 0:
+            self.parameters[idx].append(np.nan)
+        else:
+            self.parameters[idx].append(self.t0s[idx] - self.t0s[idx - 1])
+        if self.t_stim is None:
+            self.parameters[idx].append(np.nan)
+        else:
+            self.parameters[idx].append(self.t0s[idx]-self.t0s_est[idx])
         # get rise time, FDHM, decay time
         try:
             q1_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
@@ -359,16 +371,17 @@ class TransientAnalyzer:
             self.parameters[idx].append(q2m_rise - q2_rise)
         else:
             self.parameters[idx].append(np.nan)
-        self.parameters[idx].append(q1_decay - t0_sig)  # durations
-        self.parameters[idx].append(q2_decay - t0_sig)
+        self.parameters[idx].append(TTP_sig - t0_sig)
         if half_rise is not None:
             self.parameters[idx].append(half_decay - half_rise)
         else:
             self.parameters[idx].append(np.nan)
-        #self.parameters[idx].append(q2m_decay - t0_sig)
-        #self.parameters[idx].append(q1m_decay - t0_sig)
         self.parameters[idx].append(q1_decay - q1m_decay)  # decay times
         self.parameters[idx].append(q2_decay - q2m_decay)
+        self.parameters[idx].append(q1_decay - t0_sig)  # durations
+        self.parameters[idx].append(q2_decay - t0_sig)
+        #self.parameters[idx].append(q2m_decay - t0_sig)
+        #self.parameters[idx].append(q1m_decay - t0_sig)
         if idx is not len(self.borders) - 2:
             self.baselines[idx + 1] = float(self.transients[idx](self.t0s_est[idx + 1] - self.t0s[idx]))
 
@@ -444,15 +457,7 @@ class TransientAnalyzer:
         return df_out
 
     def GetParametersTable(self, x_label="x", y_label="y"):
-        """GetParametersTable allows to get the table with parameters such as:
-
-     * Amplitude;
-     * Baseline;
-     * Time-to-peak (*TTP*);
-     * Rise time at quantiles (*x-(100-x)%*) defined by user (20-80%, 10-90%, etc.);
-     * Transients durations at quantiles (*100-x%*) defined by user (80%, 90%, etc.) and at 50% (Full Duration at Half Maximum (FDHM));
-     * Decay time at quantiles (*(100-x)-x%*) defined by user (80-20%, 90-10%, etc.);
-
+        """GetParametersTable allows to get the table with parameters.
        Table of parameters contains values of *t0* - the start time of the transient or of the stimulus, *delta t0* - the difference in t0 between two
        neighboring transients and Delay - the difference between stimulus time and the start of the transient.
 
@@ -478,11 +483,10 @@ class TransientAnalyzer:
             y_out = y_out[0]
         else:
             y_out = ""
-        columns = [f"t0{x_out}", f"delta t0{x_out}", f"Delay{x_out}", f"Baseline{y_out}", f"Amplitude{y_out}", f"TTP{x_out}",
-                   f"t_{q1}%-{100 - q1}%{x_out}", f"t_{q2}%-{100 - q2}%{x_out}", f"d_{100 - q1}%{x_out}",
-                   f"d_{100 - q2}%{x_out}", f"FDHM{x_out}", f"t_{100-q1}%-{q1}%{x_out}", f"t_{100-q2}%-{q2}%{x_out}"]
+        columns = [f"Baseline{y_out}",  f"Amplitude{y_out}", f"t0{x_out}", f"delta t0{x_out}", f"Delay{x_out}", 
+                f"t_{q1}%-{100 - q1}%{x_out}", f"t_{q2}%-{100 - q2}%{x_out}", f"TTP{x_out}", f"FDHM{x_out}",
+                f"t_{100-q1}%-{q1}%{x_out}", f"t_{100-q2}%-{q2}%{x_out}",f"d_{100 - q1}%{x_out}", f"d_{100 - q2}%{x_out}"]
         pars = np.array(self.parameters)
-        pars[1:, 1] = pars[1:, 0] - pars[:-1, 0]
         df = pd.DataFrame(pars, columns=columns)
         return df
 
