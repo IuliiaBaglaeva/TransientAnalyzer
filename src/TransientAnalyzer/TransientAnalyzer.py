@@ -10,7 +10,6 @@ from scipy.interpolate import CubicSpline, interp1d
 import gpflow
 import re
 from pybaselines import Baseline
-
 from .LinearGibbs import LinearGibbs
 from .EMOneDimGaussian import EMOneDimGaussian
 
