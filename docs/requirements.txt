@@ -6,3 +6,4 @@ tensorflow
 pandas
 gpflow
 scipy
+pybaselines
