@@ -3,12 +3,16 @@
 import numpy as np
 import pandas as pd
 from scipy.signal import windows, find_peaks
+from scipy.ndimage import convolve1d
 from scipy.optimize import minimize, bisect
 from copy import deepcopy
 from scipy.interpolate import CubicSpline, interp1d
 import gpflow
-from .LinearGibbs import LinearGibbs
 import re
+from pybaselines import Baseline
+
+from .LinearGibbs import LinearGibbs
+from .EMOneDimGaussian import EMOneDimGaussian
 
 
 class TransientAnalyzer:
@@ -43,27 +47,40 @@ and a total N-dimensional covariance matrix K with the elements:
      * Transients durations at percentiles (*100-x%*) defined by user (80%, 90%, etc.);    
      """
 
-    def __init__(self, time, Sig, kernel="Gibbs",
-                 window_size=20, prominence=1, t_stim=None,
-                 quantile1=0.1, quantile2=0.2):
+    def __init__(self, time, Sig, start_gradient = 0, kernel="Gibbs",
+                 window_size=20, window_size2 = 0, prominence=1, t_stim=None,
+                 detrend = False, beta = 0.25, shift = 0, 
+                 quantile1=0.1, quantile2=0.2, is_fall = None):
         """
         
         :param time: array of the values of the time during contraction
         :type time: array_like
         :param Sig: array of the values of the transients
         :type Sig: array_like
+        :param start_gradient: starting point for the heavy ball algorithm used for the transient's start detection
+        :type start_gradient: float, optional
         :param kernel: kernel used for analyze, can be chosen between RBF and Gibbs, defaults to "Gibbs"
         :type kernel: str, optional
-        :param window_size: size of box filter window, can be modified in case of the bad detection of transients start, defaults to 20
+        :param window_size: size of box filter window for transients start detection, can be modified in case of the bad detection of transients start, defaults to 20
         :type window_size: int, optional
+        :param window_size2: size of box filter window for smoothing transient in order to detect the transients start. The values less or equal to zero mean no usage of the filter. defaults to 0
+        :type window_size2: float, optional
         :param prominence: measures how much a peak stands out from the surrounding baseline, can be used when no or extra transients are detected, defaults to 1
         :type prominence: float, optional
         :param t_stim: stimulation times, defaults to None
         :type t_stim: array_like, optional
+        :param detrend: defines whether to detrend the data or not, defaults to False
+        :type detrend: bool
+        :param beta: "inertion" parameter used in transients start detection, defaults to 0.25
+        :type beta: float
+        :param shift: shift(in data points) to the left so that the estimated starting time is before the actual start of transient
+        :type shift: int
         :param quantile1: the first quantile for parameters of transients, will be used for the detection of rise,decay times and durations as the ones between quantile1 and 1 - quantile1 percents of the corresponding transient phase,  defaults to 0.1
         :type quantile1: float
         :param quantile2: the second quantile for parameters of transients, will be used for the detection of rise,decay times and durations as the ones between quantile1 and 1 - quantile1 percents of the corresponding transient phase,  defaults to 0.2
         :type quantile2: float
+        :param is_fall: defines whether the transients are falling or not. If the parameter is None, it will be defined automatically by the gaussian mixture model. Defaults to None
+        :type is_fall: bool
         """
         self.transients = []
         self.parameters = []
@@ -74,19 +91,36 @@ and a total N-dimensional covariance matrix K with the elements:
         self.t0s_est = []
         self._window_size = window_size
         self._prominence = prominence
-        self._n_baseline = 100
+        self._n_baseline = 80
         self.frac_spline = 0.04
         self._kernel = None
+        self._window_size2 = window_size2
+        self._beta = beta
+        self._shift = shift
+        if is_fall is None:
+            model = EMOneDimGaussian()
+            model.fit(Sig)
+            idx_max = np.argmax(model._w[0])
+            if model._mu[0][idx_max] > model._mu[0][(idx_max + 1) % 2]:
+                self.is_fall = True
+            else:
+                self.is_fall = False
+        else:
+            self.is_fall = is_fall
+        self._SetData(time, Sig, t_stim,detrend)
+        if start_gradient < 0:
+            self._start_gradient = 2 * np.min(np.diff(self.Time))
+        else:
+            self._start_gradient = start_gradient
         if kernel == "Gibbs":
-            self._kernel = LinearGibbs()
+            self._kernel = LinearGibbs(np.min(np.diff(self.Time)) * 0.5)
         else:
             self._kernel = gpflow.kernels.RBF()
         self.quantile1 = quantile1
         self.quantile2 = quantile2
-        self._SetData(time, Sig, t_stim)
         self._n_samples_offset = 8
 
-    def _SetData(self, time, Sig, t_stim):
+    def _SetData(self, time, Sig, t_stim, detrend):
         """Sets data provided by the user (private method)
 
         :param time: array of the values of the time during contraction
@@ -100,6 +134,10 @@ and a total N-dimensional covariance matrix K with the elements:
         same_length = (len(time) == len(Sig))
         if time is None or Sig is None or not same_length:
             raise Exception("One of the arrays is not defined or they do not have the same length")
+        if detrend:
+            baseline_fitter = Baseline(x_data=time)
+            imodpoly = baseline_fitter.imodpoly(Sig, poly_order=4)[0]
+            Sig = Sig - imodpoly + imodpoly[0]
         self.Time = np.copy(time)
         self.Sig = np.copy(Sig)
         self._FindEstAllT0(t_stim)
@@ -197,26 +235,37 @@ and a total N-dimensional covariance matrix K with the elements:
         """
         self.dt = (self.Time[1] - self.Time[0])
         if t_stim is None:
+            if self._window_size2 <= 0:
+                win2 = np.ones(1)
+                init_shift = int(0)
+            else:
+                win2 = windows.boxcar(self._window_size2)
+                init_shift = int((self._window_size2 - 1)//2)
+            sig = convolve1d(self.Sig, win2, mode='mirror') / np.sum(win2)
+            if self.is_fall:
+                sig *= -1
             win = windows.boxcar(self._window_size)
-            filtered = np.convolve(self.Sig, win, mode='same') / np.sum(win)
-            res = filtered - self.Sig
+            filtered = convolve1d(sig, win, mode='mirror') / np.sum(win)
+            res = filtered - sig
             self.borders, _ = find_peaks(res, prominence=self._prominence * np.max(res), height=0)
-            self.borders = self.borders.astype("int64")
-            self.t0s_est = self.borders * self.dt + self.Time[0]
+            self.borders = self.borders.astype("int64") + init_shift - int(self._shift)
+            self.t0s_est = self.Time[self.borders]
         else:
             self.t0s_est = deepcopy(t_stim)
-            self.borders = self.t0s_est / self.dt
-            self.borders = self.borders.astype('int64')
+            self.borders = []
+            for t0 in self.t0s_est:
+                self.borders.append(np.argmax(t0 <= self.Time))
+            self.borders = np.array(self.borders, dtype = 'int64')
         self.t0s = [-1] * len(self.borders)
         self.baselines = [-1] * len(self.borders)
         self.transients = [-1] * len(self.borders)
         self.parameters = [-1] * len(self.borders)
-        self.borders = np.append(self.borders, (self.Time[-1] - self.Time[0]) / self.dt).astype("uint64")
+        self.borders = np.append(self.borders, self.Time.shape[0] - 1).astype("uint64")
         n = len(self.borders) - 1
         for i in range(n):
             if i == 0:
-                dn = int((self.t0s_est[0] - self.Time[0]) / self.dt)
-                n0 = max(dn - self._n_baseline, 0)
+                dn = self.borders[0]
+                n0 = int(max(dn - self._n_baseline, 0))
                 self.baselines[i] = np.mean(self.Sig[n0:dn])
 
     def _FindT0(self, t0, spline, mean):
@@ -232,46 +281,51 @@ and a total N-dimensional covariance matrix K with the elements:
         :rtype: array_like
 
         """
-        res = spline(t0)[0] / mean - 1
+        res = spline(t0)[0] / mean(t0) - 1
         return res * res
 
-    def _Gradient(self, x_start, cs, baseline):
-        """Gradient descent
+    def _Gradient(self, func,x_start, args,alpha = 0.002, beta = 0.25):
+        """Heavy ball method (Polyak, 1964)
 
+        :param func: the function to be optimized
+        :type func: callable
         :param x_start: starting point
-        :type t0: float
-        :param cs: GP spline
-        :type spline: UnivariateSpline
-        :param baseline: baseline value
-        :type mean: float
-        :return: time, at which GPs intersect
-        :rtype: float
+        :type x_start: float
+        :param alpha: parameter of gradient
+        :type alpha: float
+        :param beta: inertion parameter of the method
+        :type beta: float
+        :param args: list of arguments for the func
+        :type args: tuple, optional
+        :return: minimum of func and corresponding x (in inverse order)
+        :rtype: float, float
 
         """
-        dx = 1e-5
-        t = x_start - 0.5 * self.dt
-        tprev = t
-        f = self._FindT0(t, cs, baseline)
+        dx = 1e-3 * self.dt
+        x = x_start
+        xprev = x
+        xprevm1 = x
+        f = func(x, *args)
         dydx = 0
-        fprev = f
-        alpha = 0.002
-        eps = 1e-5
+        eps = 1e-6
         n_iter = 0
-        while f > 0:
-            fl = self._FindT0(t - dx, cs, baseline)
-            fr = self._FindT0(t + dx, cs, baseline)
+        fl = func(x - dx, *args)
+        fr = func(x + dx, *args)
+        dydx = (fr - fl) / (2 * dx)
+        alpha *= 20/dydx
+        while n_iter <= 10:
+            fl = func(x - dx, *args)
+            fr = func(x + dx, *args)
             dydx = (fr - fl) / (2 * dx)
-            t = tprev - alpha * dydx
-            f = self._FindT0(t, cs, baseline)
-            if np.abs(f - fprev) < eps:
+            x = xprev - alpha * dydx + beta * (xprev - xprevm1)
+            f = func(x, *args)
+            if np.abs(x - xprev) < eps:
                 n_iter += 1
-                if n_iter > 10:
-                    break
             else:
                 n_iter = 0
-            tprev = t
-            fprev = f
-        return t
+            xprevm1 = xprev
+            xprev = x
+        return x, f
 
     def _FitSingleTransient(self, idx):
         """_FitSingleTransient approximates one of chosen transient by Gaussian process (GP) and obtains the signal parameters which describe amplitude and kinetics
@@ -284,37 +338,49 @@ and a total N-dimensional covariance matrix K with the elements:
         t, sig = self.GetExpTransient(idx, False)
         ti = t[0]
         t -= t[0]
-        # Calcium signal
-        baseline = self.baselines[idx]
+        t_start = - self._start_gradient
+        t_end = self._start_gradient
         Yfit = sig[::]
-        Yfit[0] = baseline
+        if idx > 0:
+            Yfit[0] = self.transients[idx-1](ti  - self.t0s_est[idx-1])
+        else:
+            Yfit[0] = self.baselines[idx]
         Xfit = t
-        # remove the points after peak
         Yfit2 = Yfit[::]
         Yfit = Yfit2[(Xfit > self.dt * self._n_samples_offset) | (
-                    Yfit2 >= baseline)]  # too low values (which appear at high noise) at the start can break the GP approximation
-        Xfit = Xfit[(Xfit > self.dt * self._n_samples_offset) | (Yfit2 >= baseline)]
+                    Yfit2 >= Yfit[0])]  # too low values (which appear at high noise) at the start can break the GP approximation
+        Xfit = Xfit[(Xfit > self.dt * self._n_samples_offset) | (Yfit2 >= Yfit[0])]
         gpr = gpflow.models.GPR((Xfit.reshape(-1, 1), Yfit.reshape(-1, 1)), kernel=self._kernel)
         opt = gpflow.optimizers.Scipy()
         opt.minimize(gpr.training_loss, variables=gpr.trainable_variables)
-        t_start = -2 * self.dt
+        if self.is_fall:
+            maxy_estidx = np.argmin(Yfit)
+        else:
+            maxy_estidx = np.argmax(Yfit)
+        t_max_est = Xfit[maxy_estidx]
         xp = np.arange(t_start, Xfit[-1], self.frac_spline * self.dt)
-        # find t0
-        x_findt0 = np.linspace(t_start, 2 * self.dt, 30)
-        mean, _ = gpr.predict_y(x_findt0.reshape(-1, 1))
-        t0_values = mean
-        cs_t0 = CubicSpline(x_findt0, t0_values)
-        t0_sig = self._Gradient(x_findt0[-1], cs_t0, baseline)
-        self.t0s[idx] = t0_sig + ti
         y = np.zeros_like(xp)
         mean, _ = gpr.predict_y(xp.reshape(-1, 1))
         y = mean[:, 0]
         cs = CubicSpline(xp, y)
         self.transients[idx] = cs
-        Peak_sig = minimize(self._MinFunc, x0=[t0_sig + 1.55 * self._n_samples_offset * self.dt],
-                            args=(self.transients[idx], True))
+        Peak_sig = minimize(self._MinFunc, x0=[t_max_est], bounds=((xp[0],xp[-1]),), args=(self.transients[idx], bool(np.abs(True - self.is_fall))))
+        if self.is_fall:
+            Peak_sig.fun *= - 1
+        # find t0
+        x_findt0 = np.linspace(t_start, min(Peak_sig.x[0],t_end), 100)
+        if idx > 0:
+            baseline_spline = CubicSpline(x_findt0,self.transients[idx-1](x_findt0 + ti - self.t0s_est[idx-1]))
+        else:
+            baseline_spline = CubicSpline(x_findt0,np.array([self.baselines[idx]] * len(x_findt0)))
+        mean, _ = gpr.predict_y(x_findt0.reshape(-1, 1))
+        t0_values = mean
+        cs_t0 = CubicSpline(x_findt0, t0_values)
+        t0_sig,_ = self._Gradient(self._FindT0, x_findt0[-1], args=(cs_t0,baseline_spline),beta = self._beta)
+        baseline = baseline_spline(t0_sig)
+        self.t0s[idx] = t0_sig + ti
         Amp_sig = -Peak_sig.fun - baseline
-        TTP_sig = Peak_sig.x[0]
+        TTP_sig = Peak_sig.x[0] - t0_sig
         base_sig = baseline
         self.parameters[idx].append(baseline)
         self.parameters[idx].append(Amp_sig)
@@ -328,60 +394,45 @@ and a total N-dimensional covariance matrix K with the elements:
         else:
             self.parameters[idx].append(self.t0s[idx]-self.t0s_est[idx])
         # get rise time, FDHM, decay time
-        try:
-            q1_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
-                             args=(self.quantile1, -Peak_sig.fun, base_sig, self.transients[idx]))
-        except:
-            q1_rise = None
-        try:
-            q2_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
-                             args=(self.quantile2, -Peak_sig.fun, base_sig, self.transients[idx]))
-        except:
-            q2_rise = None
-        try:
-            half_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
-                               args=(0.5, -Peak_sig.fun, base_sig, self.transients[idx]))
-        except:
-            half_rise = None
-        try:
-            q1m_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
-                              args=(1 - self.quantile1, -Peak_sig.fun, base_sig, self.transients[idx]))
-        except:
-            q1m_rise = None
-        try:
-            q2m_rise = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
-                              args=(1 - self.quantile2, -Peak_sig.fun, base_sig, self.transients[idx]))
-        except:
-            q2m_rise = None
-        q1_decay = bisect(self._FindTimeFraction, TTP_sig, t[-1],
-                          args=(self.quantile1, -Peak_sig.fun, base_sig, self.transients[idx]))
-        q2_decay = bisect(self._FindTimeFraction, TTP_sig, t[-1],
-                          args=(self.quantile2, -Peak_sig.fun, base_sig, self.transients[idx]))
-        half_decay = bisect(self._FindTimeFraction, TTP_sig, t[-1],
-                            args=(0.5, -Peak_sig.fun, base_sig, self.transients[idx]))
-        q1m_decay = bisect(self._FindTimeFraction, TTP_sig, t[-1],
-                           args=(1 - self.quantile1, -Peak_sig.fun, base_sig, self.transients[idx]))
-        q2m_decay = bisect(self._FindTimeFraction, TTP_sig, t[-1],
-                           args=(1 - self.quantile2, -Peak_sig.fun, base_sig, self.transients[idx]))
-        if q1m_rise is not None and q1_rise is not None:
-            self.parameters[idx].append(q1m_rise - q1_rise)  # rise times
+        rise_times = np.zeros(5)
+        decay_times = np.zeros_like(rise_times)
+        quantiles = np.array([self.quantile1,self.quantile2,0.5,1 - self.quantile2, 1 - self.quantile1])
+        for i in range(5): #durations of rise phase
+            try:
+                rise_times[i] = bisect(self._FindTimeFraction, t0_sig, TTP_sig,
+                                args=(quantiles[i], -Peak_sig.fun, base_sig, self.transients[idx]))
+                self.parameters[idx].append(rise_times[i] - t0_sig)        
+            except:
+                rise_times[i] = None
+                self.parameters[idx].append(np.nan)
+        self.parameters[idx].append(TTP_sig)
+        if self.is_fall:
+            maxy_estidx2 = np.argmax(Yfit[maxy_estidx:])
+        else:
+            maxy_estidx2 = np.argmin(Yfit[maxy_estidx:])
+        min_f_after_ttp = minimize(self._MinFunc, x0=[Xfit[maxy_estidx + maxy_estidx2]], bounds=((TTP_sig,t[-1]),), args=(self.transients[idx], bool(np.abs(False - self.is_fall))))
+        for i in range(5):  #durations of decay phase
+            try:
+                decay_times[i] = bisect(self._FindTimeFraction, TTP_sig, min_f_after_ttp.x[0], 
+                args=(1 - quantiles[i], -Peak_sig.fun, base_sig, self.transients[idx]))
+                self.parameters[idx].append(decay_times[i] - t0_sig)
+            except:
+                decay_times[i] = None
+                self.parameters[idx].append(np.nan)
+        for i in reversed(range(2)):
+            if rise_times[i] is not None and rise_times[4-i] is not None:
+                self.parameters[idx].append(rise_times[4-i] - rise_times[i])  # rise times
+            else:
+                self.parameters[idx].append(np.nan)
+        if rise_times[2] is not None and decay_times[2] is not None:
+            self.parameters[idx].append(decay_times[2] - rise_times[2])
         else:
             self.parameters[idx].append(np.nan)
-        if q1m_rise is not None and q1_rise is not None:
-            self.parameters[idx].append(q2m_rise - q2_rise)
-        else:
-            self.parameters[idx].append(np.nan)
-        self.parameters[idx].append(TTP_sig - t0_sig)
-        if half_rise is not None:
-            self.parameters[idx].append(half_decay - half_rise)
-        else:
-            self.parameters[idx].append(np.nan)
-        self.parameters[idx].append(q1_decay - q1m_decay)  # decay times
-        self.parameters[idx].append(q2_decay - q2m_decay)
-        self.parameters[idx].append(q1_decay - t0_sig)  # durations
-        self.parameters[idx].append(q2_decay - t0_sig)
-        #self.parameters[idx].append(q2m_decay - t0_sig)
-        #self.parameters[idx].append(q1m_decay - t0_sig)
+        for i in reversed(range(2)):
+            if decay_times[i] is not None and decay_times[4-i] is not None:
+                self.parameters[idx].append(decay_times[4-i] - decay_times[i])  # decay times
+            else:
+                self.parameters[idx].append(np.nan)
         if idx is not len(self.borders) - 2:
             self.baselines[idx + 1] = float(self.transients[idx](self.t0s_est[idx + 1] - self.t0s[idx]))
 
@@ -446,13 +497,13 @@ and a total N-dimensional covariance matrix K with the elements:
             sig_exp_out = np.hstack((sig_exp_out, sig))
             sig_model_out = np.hstack((sig_model_out, sig_model))
         sig_spline = interp1d(t_model_out, sig_model_out,fill_value = "extrapolate")
-        sig_model_out = sig_spline(t_exp_out[t_exp_out > t_model_out[0]])
+        sig_model_out = sig_spline(t_exp_out[t_exp_out >= t_model_out[0]])
         columns = [x_label, y_label, f"Approximated {y_label}"]
         output = np.zeros((t_exp_out.shape[0], 3))
         output.fill(np.nan)
         output[:, 0] = t_exp_out
         output[:, 1] = sig_exp_out
-        output[t_exp_out > t_model_out[0], 2] = sig_model_out
+        output[t_exp_out >= t_model_out[0], 2] = sig_model_out
         df_out = pd.DataFrame(output, columns=columns[:3])
         return df_out
 
@@ -483,9 +534,18 @@ and a total N-dimensional covariance matrix K with the elements:
             y_out = y_out[0]
         else:
             y_out = ""
-        columns = [f"Baseline{y_out}",  f"Amplitude{y_out}", f"t0{x_out}", f"delta t0{x_out}", f"Delay{x_out}", 
-                f"t_{q1}%-{100 - q1}%{x_out}", f"t_{q2}%-{100 - q2}%{x_out}", f"TTP{x_out}", f"FDHM{x_out}",
-                f"t_{100-q1}%-{q1}%{x_out}", f"t_{100-q2}%-{q2}%{x_out}",f"d_{100 - q1}%{x_out}", f"d_{100 - q2}%{x_out}"]
+        quantiles = np.array([q1,q2,50,100 - q2, 100 - q1])
+        list_r = [f"r_{q}%{x_out}" for q in quantiles]
+        list_d = [f"d_{q}%{x_out}" for q in quantiles]
+        list_tr = [f"t_{100-q}%-{q}%{x_out}" for q in quantiles[3:]]
+        list_td = [f"t_{q}%-{100-q}%{x_out}" for q in quantiles[3:]]
+        columns = [f"Baseline{y_out}",  f"Amplitude{y_out}", f"t0{x_out}", f"delta t0{x_out}", f"Delay{x_out}"]
+        columns.extend(list_r)
+        columns.append(f"TTP{x_out}") 
+        columns.extend(list_d)
+        columns.extend(list_tr)
+        columns.append(f"FDHM{x_out}")
+        columns.extend(list_td)
         pars = np.array(self.parameters)
         df = pd.DataFrame(pars, columns=columns)
         return df

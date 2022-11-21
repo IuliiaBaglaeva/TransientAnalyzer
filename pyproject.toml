@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TransientAnalyzer"
-version = "0.33b"
+version = "0.33c"
 authors = [
   { name="Iuliia Baglaeva, Bogdan Iaparov, Ivan Zahradník, Alexandra Zahradníková", email="iuliia.baglaeva@savba.sk" },
 ]
@@ -22,6 +22,7 @@ dependencies = [
 	"pandas",
 	"numpy",
 	"scipy",
+	"pybaselines",
 	'importlib-metadata; python_version>="3.7"',
 ]
 
