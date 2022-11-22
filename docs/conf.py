@@ -21,7 +21,7 @@ project = 'TransientAnalyzer'
 author = 'Iuliia Baglaeva, Bogdan Iaparov'
 
 # The full version, including alpha/beta/rc tags
-release = '0.33c'
+release = '1.0'
 
 
 # -- General configuration ---------------------------------------------------
