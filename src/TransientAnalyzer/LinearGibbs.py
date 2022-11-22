@@ -12,20 +12,15 @@ class LinearGibbs(gpflow.kernels.Kernel):
 
     
     """
-    def __init__(self):
+    def __init__(self,B_min = 1e-6):
         """
         
-        :param A: slope of the lengthscale
-        :type A: float
-        :param B: intercept of the lengthscale 
-        :type B: float
-        :param variance: variance (C) of the kernel
-        :type variance: float 
-        
-        """    
+        :param B_min: minimum value of lengthscale intercept. Defaults to 1e-6
+        :type B_min: float
+        """
         super().__init__(active_dims=[0])
         self.A = gpflow.Parameter(1.0)
-        self.B = gpflow.Parameter(1.0)
+        self.B = gpflow.Parameter(max(1.0,B_min) + 1e-6, transform = gpflow.utilities.positive(B_min))
         self.variance = gpflow.Parameter(1.0, transform = gpflow.utilities.positive())
 
     def _l(self,X):
