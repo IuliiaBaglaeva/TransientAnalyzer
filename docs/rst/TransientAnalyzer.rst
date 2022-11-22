@@ -4,6 +4,14 @@ TransientAnalyzer package
 Submodules
 ----------
 
+TransientAnalyzer.EMOneDimGaussian module
+-----------------------------------------
+
+.. automodule:: TransientAnalyzer.EMOneDimGaussian
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 TransientAnalyzer.LinearGibbs module
 ------------------------------------
 
