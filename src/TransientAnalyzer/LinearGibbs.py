@@ -19,7 +19,7 @@ class LinearGibbs(gpflow.kernels.Kernel):
         :type B_min: float
         """
         super().__init__(active_dims=[0])
-        self.A = gpflow.Parameter(1.0)
+        self.A = gpflow.Parameter(1.0, transform = gpflow.utilities.positive())
         self.B = gpflow.Parameter(max(1.0,B_min) + 1e-6, transform = gpflow.utilities.positive(B_min))
         self.variance = gpflow.Parameter(1.0, transform = gpflow.utilities.positive())
 

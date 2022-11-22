@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TransientAnalyzer"
-version = "1.0"
+version = "1.1"
 authors = [
   { name="Iuliia Baglaeva, Bogdan Iaparov, Ivan Zahradník, Alexandra Zahradníková", email="iuliia.baglaeva@savba.sk" },
 ]
