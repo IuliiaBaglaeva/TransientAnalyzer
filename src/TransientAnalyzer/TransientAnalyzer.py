@@ -117,7 +117,6 @@ and a total N-dimensional covariance matrix K with the elements:
             self._kernel = gpflow.kernels.RBF()
         self.quantile1 = quantile1
         self.quantile2 = quantile2
-        self._n_samples_offset = 8
 
     def _SetData(self, time, Sig, t_stim, detrend):
         """Sets data provided by the user (private method)
@@ -345,13 +344,13 @@ and a total N-dimensional covariance matrix K with the elements:
         else:
             Yfit[0] = self.baselines[idx]
         Xfit = t
-        Yfit2 = Yfit[::]
-        Yfit = Yfit2[(Xfit > self.dt * self._n_samples_offset) | (
-                    Yfit2 >= Yfit[0])]  # too low values (which appear at high noise) at the start can break the GP approximation
-        Xfit = Xfit[(Xfit > self.dt * self._n_samples_offset) | (Yfit2 >= Yfit[0])]
         gpr = gpflow.models.GPR((Xfit.reshape(-1, 1), Yfit.reshape(-1, 1)), kernel=self._kernel)
         opt = gpflow.optimizers.Scipy()
-        opt.minimize(gpr.training_loss, variables=gpr.trainable_variables)
+        try:
+            opt.minimize(gpr.training_loss, variables=gpr.trainable_variables)
+        except:
+            gpr.kernel.A = gpflow.Parameter(1.0, transform = gpflow.utilities.positive())
+            opt.minimize(gpr.training_loss, variables=gpr.trainable_variables)
         if self.is_fall:
             maxy_estidx = np.argmin(Yfit)
         else:
