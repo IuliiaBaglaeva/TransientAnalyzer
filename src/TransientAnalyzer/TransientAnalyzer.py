@@ -310,7 +310,7 @@ and a total N-dimensional covariance matrix K with the elements:
         fl = func(x - dx, *args)
         fr = func(x + dx, *args)
         dydx = (fr - fl) / (2 * dx)
-        alpha *= 20/dydx
+        alpha *= 20/np.abs(dydx)
         while n_iter <= 10:
             fl = func(x - dx, *args)
             fr = func(x + dx, *args)
