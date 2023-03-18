@@ -48,7 +48,7 @@ and a total N-dimensional covariance matrix K with the elements:
 
     def __init__(self, time, Sig, start_gradient = 0, kernel="Gibbs",
                  window_size=20, window_size2 = 0, prominence=1, t_stim=None,
-                 detrend = False, beta = 0.25, shift = 0, 
+                 detrend = False, alpha_mult = 1, beta = 0.25, shift = 0, 
                  quantile1=0.1, quantile2=0.2, is_fall = None):
         """
         
@@ -70,6 +70,8 @@ and a total N-dimensional covariance matrix K with the elements:
         :type t_stim: array_like, optional
         :param detrend: defines whether to detrend the data or not, defaults to False
         :type detrend: bool
+        :param alpha_mult: defines the multiplier of learning rate, important to change if the estimated t0 goes to infinitively large values, defaults to 1
+        :type alpha_mult: float
         :param beta: "inertion" parameter used in transients start detection, defaults to 0.25
         :type beta: float
         :param shift: shift(in data points) to the left so that the estimated starting time is before the actual start of transient
@@ -96,6 +98,7 @@ and a total N-dimensional covariance matrix K with the elements:
         self._window_size2 = window_size2
         self._beta = beta
         self._shift = shift
+        self._alpha_mult = alpha_mult
         if is_fall is None:
             model = EMOneDimGaussian()
             model.fit(Sig)
@@ -374,7 +377,7 @@ and a total N-dimensional covariance matrix K with the elements:
         mean, _ = gpr.predict_y(x_findt0.reshape(-1, 1))
         t0_values = mean
         cs_t0 = CubicSpline(x_findt0, t0_values)
-        t0_sig,_ = self._Gradient(self._FindT0, x_findt0[-1], args=(cs_t0,baseline_spline),beta = self._beta)
+        t0_sig,_ = self._Gradient(self._FindT0, x_findt0[-1], args=(cs_t0,baseline_spline),beta = self._beta, alpha = 0.002 * self._alpha_mult)
         baseline = baseline_spline(t0_sig)
         self.t0s[idx] = t0_sig + ti
         Amp_sig = -Peak_sig.fun - baseline
