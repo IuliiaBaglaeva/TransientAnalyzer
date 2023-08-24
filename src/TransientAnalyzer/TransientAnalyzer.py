@@ -101,9 +101,13 @@ and a total N-dimensional covariance matrix K with the elements:
         self._alpha_mult = alpha_mult
         if is_fall is None:
             model = EMOneDimGaussian()
-            model.fit(Sig)
-            idx_max = np.argmax(model._w[0])
-            if model._mu[0][idx_max] > model._mu[0][(idx_max + 1) % 2]:
+            deriv = np.abs(Sig[:-2] - Sig[2:])
+            pred = model.fit_predict(deriv)
+            means = []
+            means.append(np.mean(Sig[1:-1][pred == 0]))
+            means.append(np.mean(Sig[1:-1][pred == 1]))
+            idx_max = np.argmax(model._mu[0])
+            if means[idx_max] < means[(idx_max + 1) % 2]:
                 self.is_fall = True
             else:
                 self.is_fall = False
@@ -285,8 +289,9 @@ and a total N-dimensional covariance matrix K with the elements:
         res = spline(t0)[0] / mean(t0) - 1
         return res * res
 
-    def _Gradient(self, func,x_start, args,alpha = 0.002, beta = 0.25):
-        """Heavy ball method (Polyak, 1964)
+    def _Gradient(self, func,x_start, args,alpha = 0.002, beta = 0.25, beta_max=0.5, beta_min=0.05,
+                                 decay=0.9, c1=1e-4, tau=0.25):
+        """Heavy ball method (Polyak, 1964) with adapted change of learning rate using Armijo's rule and the momentum based on sign consistency.
 
         :param func: the function to be optimized
         :type func: callable
@@ -296,6 +301,18 @@ and a total N-dimensional covariance matrix K with the elements:
         :type alpha: float
         :param beta: inertion parameter of the method
         :type beta: float
+        :param beta_max: maximum inertion parameter of the method
+        :type beta_max: float
+        :param beta_min: minimum inertion parameter of the method
+        :type beta_min: float
+        :param decay: steepness of beta changes according to sign consistency
+        :type decay: float
+        :param decay: steepness of beta changes according to sign consistency
+        :type decay: float
+        :param c1: parameter used in Armijo's rule
+        :type c1: float
+        :param tau: steepness of alpha changes. Must be less than 1.
+        :type tau: float
         :param args: list of arguments for the func
         :type args: tuple, optional
         :return: minimum of func and corresponding x (in inverse order)
@@ -313,11 +330,21 @@ and a total N-dimensional covariance matrix K with the elements:
         fl = func(x - dx, *args)
         fr = func(x + dx, *args)
         dydx = (fr - fl) / (2 * dx)
-        alpha *= 20/np.abs(dydx)
+        previous_dydx = dydx
+        alpha_init = alpha *  20/np.abs(dydx)
         while n_iter <= 10:
             fl = func(x - dx, *args)
             fr = func(x + dx, *args)
             dydx = (fr - fl) / (2 * dx)
+            # Adaptive alpha (Armijo's Condition)
+            alpha = alpha_init
+            while func(x - alpha * dydx, *args) > f - c1 * alpha * np.power(dydx,2):
+                alpha *= tau      
+            # Adaptive beta
+            if dydx * previous_dydx < 0:
+                beta = max(beta_min, beta * decay)
+            else:
+                beta = min(beta_max, beta / decay)
             x = xprev - alpha * dydx + beta * (xprev - xprevm1)
             f = func(x, *args)
             if np.abs(x - xprev) < eps:
@@ -326,6 +353,7 @@ and a total N-dimensional covariance matrix K with the elements:
                 n_iter = 0
             xprevm1 = xprev
             xprev = x
+            previous_dydx = dydx
         return x, f
 
     def _FitSingleTransient(self, idx):

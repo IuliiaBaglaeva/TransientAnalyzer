@@ -54,3 +54,28 @@ class EMOneDimGaussian:
             else:
                 cur_iter = 0
             prev_LL = cur_LL
+
+    def predict(self, Y):
+        """
+        Assign each data point to the Gaussian with the highest posterior probability.
+        
+        :param Y: 1D numpy array of values to be classified
+        :type Y: array-like
+        
+        :return: Array containing cluster assignments for each point in X
+        :rtype: array-like
+        """
+        return np.argmax(self._w.T * self._N(Y), axis=0)
+
+    def fit_predict(self,Y):
+        """
+        Does fitting and prediction sequentially using Y
+        
+        :param Y: 1D numpy array of values to be classified
+        :type Y: array-like
+        
+        :return: Array containing cluster assignments for each point in X
+        :rtype: array-like
+        """
+        self.fit(Y)
+        return self.predict(Y)
